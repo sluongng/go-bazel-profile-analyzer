@@ -109,7 +109,9 @@ func (ss *StatsSummary) String() string {
 }
 
 type BazelProfileAnalysis struct {
-	Summary *StatsSummary
+	Summary                *StatsSummary
+	TefData                *tefio.TefData
+	CriticalPathComponents []*events.Complete
 	// TODO: add more stuffs
 }
 
@@ -122,7 +124,7 @@ func Analyze(profileFilePath string) (*BazelProfileAnalysis, error) {
 	}
 	defer f.Close()
 
-	traces, err := tefio.ParseJsonObj(f)
+	tefData, err := tefio.ParseJsonObj(f)
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse file: %v", err)
 	}
@@ -132,14 +134,16 @@ func Analyze(profileFilePath string) (*BazelProfileAnalysis, error) {
 	// TODO: do we need/care about this?
 	threadName := make(map[int64]string)
 
+	// outputs data
 	phaseSummaryStats := &StatsSummary{}
+	criticalPathComponents := []*events.Complete{}
 
 	lastPhaseEvent := ""
 	lastPhaseEventTimeStamp := 0 * time.Microsecond
 	maxEndTime := 0 * time.Microsecond
-	for _, event := range traces.Events() {
+	for _, event := range tefData.Events() {
+		// calculate maxEndTime
 		eventTimeStamp := time.Duration(event.Core().Timestamp) * time.Microsecond
-
 		if eventTimeStamp > maxEndTime {
 			maxEndTime = eventTimeStamp
 		}
@@ -163,7 +167,7 @@ func Analyze(profileFilePath string) (*BazelProfileAnalysis, error) {
 			}
 
 			if isCricitalPathComponent(e) {
-				// TODO: handle critical events
+				criticalPathComponents = append(criticalPathComponents, e)
 				continue
 			}
 
@@ -184,8 +188,6 @@ func Analyze(profileFilePath string) (*BazelProfileAnalysis, error) {
 		case *events.MetadataThreadName:
 			threadName[*e.Core().ThreadID] = e.ThreadName
 		case *events.Counter:
-			// TODO: not sure what to do with action counters and cpu counters
-			// ignore them for now
 		default:
 		}
 	}
@@ -195,7 +197,9 @@ func Analyze(profileFilePath string) (*BazelProfileAnalysis, error) {
 	}
 
 	return &BazelProfileAnalysis{
-		phaseSummaryStats,
+		Summary:                phaseSummaryStats,
+		TefData:                tefData,
+		CriticalPathComponents: criticalPathComponents,
 	}, nil
 }
 
