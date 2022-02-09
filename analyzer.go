@@ -111,6 +111,7 @@ func (ss *StatsSummary) String() string {
 type BazelProfileAnalysis struct {
 	Summary                *StatsSummary
 	TefData                *tefio.TefData
+	ThreadNames            map[int64]string
 	CriticalPathComponents []*events.Complete
 	// TODO: add more stuffs
 }
@@ -132,7 +133,7 @@ func Analyze(profileFilePath string) (*BazelProfileAnalysis, error) {
 	// Mapping thread IDs and thread names
 	// ID is unique but names can be duplicated
 	// TODO: do we need/care about this?
-	threadName := make(map[int64]string)
+	threadNames := make(map[int64]string)
 
 	// outputs data
 	phaseSummaryStats := &StatsSummary{}
@@ -186,7 +187,7 @@ func Analyze(profileFilePath string) (*BazelProfileAnalysis, error) {
 			lastPhaseEvent = NameProfilePhases[e.Core().Name]
 			lastPhaseEventTimeStamp = eventTimeStamp
 		case *events.MetadataThreadName:
-			threadName[*e.Core().ThreadID] = e.ThreadName
+			threadNames[*e.Core().ThreadID] = e.ThreadName
 		case *events.Counter:
 		default:
 		}
@@ -199,6 +200,7 @@ func Analyze(profileFilePath string) (*BazelProfileAnalysis, error) {
 	return &BazelProfileAnalysis{
 		Summary:                phaseSummaryStats,
 		TefData:                tefData,
+		ThreadNames:            threadNames,
 		CriticalPathComponents: criticalPathComponents,
 	}, nil
 }
