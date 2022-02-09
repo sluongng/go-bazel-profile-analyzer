@@ -25,6 +25,7 @@ var NameProfilePhases = map[string]string{
 
 // StatsSummary holds the duration of each phases inside the profile
 type StatsSummary struct {
+	Start                   time.Time
 	Launch                  *time.Duration
 	Init                    *time.Duration
 	TargetPatternEvaluation *time.Duration
@@ -37,9 +38,15 @@ type StatsSummary struct {
 	Total                   time.Duration
 }
 
+func newStatsSummary(startTime time.Time) *StatsSummary {
+	return &StatsSummary{
+		Start: startTime,
+	}
+}
+
 // AddValue help add phases values to StatSummary
 // only known phases listedn in analyzer.NameProfilePhases are accepted
-func (ss *StatsSummary) AddValue(phaseName string, val time.Duration) {
+func (ss *StatsSummary) addValue(phaseName string, val time.Duration) {
 	switch phaseName {
 	case "launch":
 		ss.Launch = &val
@@ -67,7 +74,7 @@ func (ss *StatsSummary) AddValue(phaseName string, val time.Duration) {
 }
 
 func (ss *StatsSummary) String() string {
-	out := "\n"
+	out := fmt.Sprintf("start time: %s\n", ss.Start)
 	if ss.Launch != nil {
 		percentage := float64(*ss.Launch) / float64(ss.Total) * 100
 		out += fmt.Sprintf("launch: %s %f%%\n", ss.Launch, percentage)
@@ -109,11 +116,49 @@ func (ss *StatsSummary) String() string {
 }
 
 type BazelProfileAnalysis struct {
-	Summary                *StatsSummary
-	TefData                *tefio.TefData
+	Summary                StatsSummary
+	BuildMetadata          BuildMetadata
+	TefData                tefio.TefData
 	ThreadNames            map[int64]string
 	CriticalPathComponents []*events.Complete
 	// TODO: add more stuffs
+}
+
+// BuildMetadata contains bazel's build metadata
+type BuildMetadata struct {
+	Date       time.Time
+	BuildID    string
+	OutputBase string
+}
+
+func newBuildMetadata(tefData *tefio.TefData) (*BuildMetadata, error) {
+	if tefData == nil || tefData.Metadata() == nil || len(tefData.Metadata()) == 0 {
+		return nil, fmt.Errorf("invalid TEF data")
+	}
+
+	result := &BuildMetadata{}
+	for k, v := range tefData.Metadata() {
+		str, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("metadata value is not string: %v", v)
+		}
+
+		switch k {
+		case "build_id":
+			result.BuildID = str
+		case "output_base":
+			result.OutputBase = str
+		case "date":
+			date, err := time.Parse(time.UnixDate, str)
+			if err != nil {
+				return nil, fmt.Errorf("invalid unix date format: %s", str)
+			}
+			result.Date = date
+		default:
+		}
+	}
+
+	return result, nil
 }
 
 // Analyze helps analyze bazel JSON profile
@@ -135,8 +180,13 @@ func Analyze(profileFilePath string) (*BazelProfileAnalysis, error) {
 	// TODO: do we need/care about this?
 	threadNames := make(map[int64]string)
 
+	buildMetadata, err := newBuildMetadata(tefData)
+	if err != nil {
+		return nil, fmt.Errorf("could not init build metadata: %v", err)
+	}
+
 	// outputs data
-	phaseSummaryStats := &StatsSummary{}
+	phaseSummaryStats := newStatsSummary(buildMetadata.Date)
 	criticalPathComponents := []*events.Complete{}
 
 	lastPhaseEvent := ""
@@ -155,11 +205,11 @@ func Analyze(profileFilePath string) (*BazelProfileAnalysis, error) {
 				if e.Core().Name != "Launch Blaze" {
 					// all build phase marker are of phase Instant
 					// except for Launch Blaze
-					return nil, fmt.Errorf("caught unexpected event %s", e.Core().Name)
+					return nil, fmt.Errorf("caught unexpected event: %s", e.Core().Name)
 				}
 
 				if lastPhaseEvent != "" {
-					phaseSummaryStats.AddValue(lastPhaseEvent, eventTimeStamp-lastPhaseEventTimeStamp)
+					phaseSummaryStats.addValue(lastPhaseEvent, eventTimeStamp-lastPhaseEventTimeStamp)
 				}
 
 				lastPhaseEvent = NameProfilePhases[e.Core().Name]
@@ -181,7 +231,7 @@ func Analyze(profileFilePath string) (*BazelProfileAnalysis, error) {
 			}
 
 			if lastPhaseEvent != "" {
-				phaseSummaryStats.AddValue(lastPhaseEvent, eventTimeStamp-lastPhaseEventTimeStamp)
+				phaseSummaryStats.addValue(lastPhaseEvent, eventTimeStamp-lastPhaseEventTimeStamp)
 			}
 
 			lastPhaseEvent = NameProfilePhases[e.Core().Name]
@@ -194,12 +244,13 @@ func Analyze(profileFilePath string) (*BazelProfileAnalysis, error) {
 	}
 
 	if lastPhaseEvent != "" {
-		phaseSummaryStats.AddValue(lastPhaseEvent, maxEndTime-lastPhaseEventTimeStamp)
+		phaseSummaryStats.addValue(lastPhaseEvent, maxEndTime-lastPhaseEventTimeStamp)
 	}
 
 	return &BazelProfileAnalysis{
-		Summary:                phaseSummaryStats,
-		TefData:                tefData,
+		Summary:                *phaseSummaryStats,
+		BuildMetadata:          *buildMetadata,
+		TefData:                *tefData,
 		ThreadNames:            threadNames,
 		CriticalPathComponents: criticalPathComponents,
 	}, nil
