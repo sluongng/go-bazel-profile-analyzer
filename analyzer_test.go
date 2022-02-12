@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -21,8 +22,13 @@ Total: 2.168868s 100%
 	assert.Nil(t, err)
 
 	assert.Equal(t, analysis.Summary.String(), expected)
+
 	assert.Equal(t, analysis.BuildMetadata.BuildID, "478e7ca7-c4f6-4255-aef9-ae71b0f2abf2")
+	assert.Equal(t, analysis.BuildMetadata.Date, time.Date(2022, time.February, 7, 0, 7, 50, 0, time.Local))
+	assert.Equal(t, analysis.BuildMetadata.OutputBase, "/private/var/tmp/_bazel_sngoc/67daa536156a4ed4d12f50f8a0b8ff9a")
+
 	assert.Equal(t, 270, len(analysis.TefData.Events()))
 	assert.Equal(t, 3, len(analysis.TefData.Metadata()))
+
 	assert.Equal(t, 1, len(analysis.CriticalPathComponents))
 }
